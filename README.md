@@ -1,4 +1,3 @@
-```markdown
 # BenzinaOggi
 
 BenzinaOggi is a Python bot that provides daily updates on the cheapest fuel stations near a specified location. It supports various fuel types (e.g., gasoline, diesel) and uses official data sources.
