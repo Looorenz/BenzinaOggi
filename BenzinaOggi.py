@@ -7,10 +7,10 @@ from datetime import datetime
 from math import radians, sin, cos, sqrt, atan2
 
 # Configurazione Telegram
-TELEGRAM_BOT_TOKEN = "8005588578:AAGlD9_mp8MteljUODYEEqHz9C43QSyXYfM"
+TELEGRAM_BOT_TOKEN = "<TELEGRAM-BOT-TOKEN>"
 CHAT_IDS = {
-    "all_fuels": "5784335172",  # Riceve il prezzo più basso per benzina e diesel
-    "only_benzina": "7328793906"  # Riceve solo benzina
+    "all_fuels": "<CHAT-ID>",  # Riceve il prezzo più basso per benzina e diesel
+    "only_benzina": "<CHAT-ID>>"  # Riceve solo benzina
 }
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
@@ -135,7 +135,7 @@ def send_telegram_message(city, fuel_types, chat_id):
 
 
 def main():
-    city = "Santeramo in colle"
+    city = "<CITY>"
     fetch_and_combine_csv_data()
     
     # Invia il prezzo più basso per benzina e diesel a una chat
