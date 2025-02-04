@@ -40,7 +40,7 @@ CHAT_IDS = {
 Execute the bot with:
 
 ```bash
-python carfuelbot.py
+python BenzinaOggi.py
 ```
 
 ## Automating (Optional)
