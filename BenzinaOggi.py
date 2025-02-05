@@ -1,43 +1,33 @@
 import requests
 import json
-import time
 import telebot
 import csv
+import os
 from datetime import datetime
-from math import radians, sin, cos, sqrt, atan2
 
-# Configurazione Telegram
 TELEGRAM_BOT_TOKEN = "<TELEGRAM-BOT-TOKEN>"
 CHAT_IDS = {
-    "all_fuels": "<CHAT-ID>",  # Riceve il prezzo più basso per benzina e diesel
-    "only_benzina": "<CHAT-ID>>"  # Riceve solo benzina
+    "all_fuels": ["<CHAT-ID>", "<CHAT-ID>"],  
+    "only_benzina": ["<CHAT-ID>"]
 }
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Configura URL dei dati ministeriali
 CSV_ANAGRAFICA_URL = 'https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'
 CSV_PREZZI_URL = 'https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv'
 JSON_DATA_FILE = "data.json"
 
-DIESEL_ALIASES = ["diesel", "blue diesel", "hi-q diesel", "supreme diesel", "diesel hvo", "gasolio oro diesel", "s-diesel", "v-power diesel", "blu diesel alpino"]
-
-def deg_to_rad(deg):
-    return deg * (3.141592653589793 / 180)
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371  # Raggio della Terra in km
-    dlat = deg_to_rad(lat2 - lat1)
-    dlon = deg_to_rad(lon2 - lon1)
-    a = sin(dlat / 2) ** 2 + cos(deg_to_rad(lat1)) * cos(deg_to_rad(lat2)) * sin(dlon / 2) ** 2
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return R * c
+DIESEL_ALIASES = ["diesel", "blue diesel", "hi-q diesel", "supreme diesel", "diesel hvo", 
+                  "gasolio", "gasolio oro diesel", "s-diesel", "v-power diesel", 
+                  "blu diesel alpino", "Gasolio"]
 
 def is_valid_float(value):
     try:
         return float(value)
     except ValueError:
         return None
+
 def fetch_and_combine_csv_data():
+    """Scarica i file CSV e li combina in un file JSON leggibile."""
     def fetch_data(url, filename):
         response = requests.get(url)
         if response.status_code == 200:
@@ -51,37 +41,41 @@ def fetch_and_combine_csv_data():
     fetch_data(CSV_PREZZI_URL, "prezzi.csv")
 
     data_dict = {}
-    
+
     with open("anagrafica.csv", newline='', encoding='utf-8') as csvfile:
         reader = csv.reader(csvfile, delimiter=';')
-        next(reader)  # Skip header
+        next(reader)
         for row in reader:
             if len(row) >= 9 and row[0].isdigit():
-                latitudine = is_valid_float(row[8])
-                longitudine = is_valid_float(row[9])
-                if latitudine is not None and longitudine is not None:
-                    data_dict[row[0]] = {
-                        'gestore': row[1],
-                        'indirizzo': f"{row[5]} {row[6]}",
-                        'latitudine': latitudine,
-                        'longitudine': longitudine,
-                        'prezzi': {}
-                    }
-    
+                station_id = row[0]
+                data_dict[station_id] = {
+                    'gestore': row[1],
+                    'indirizzo': f"{row[5]} {row[6]}",
+                    'latitudine': is_valid_float(row[8]),
+                    'longitudine': is_valid_float(row[9]),
+                    'prezzi': {}
+                }
+
     with open("prezzi.csv", newline='', encoding='utf-8') as csvfile:
         reader = csv.reader(csvfile, delimiter=';')
-        next(reader)  # Skip header
+        next(reader)
         for row in reader:
             if len(row) >= 5 and row[0] in data_dict:
+                station_id = row[0]
                 carburante = row[1].lower()
                 prezzo = is_valid_float(row[2])
+                tipo = row[3]  # 0 = servito, 1 = self
+
                 if prezzo is not None:
-                    if carburante not in data_dict[row[0]]['prezzi'] or prezzo < data_dict[row[0]]['prezzi'][carburante]['prezzo']:
-                        data_dict[row[0]]['prezzi'][carburante] = {
-                            'prezzo': prezzo,
-                            'data': row[4]
-                        }
-    
+                    if carburante not in data_dict[station_id]['prezzi']:
+                        data_dict[station_id]['prezzi'][carburante] = {"self": None, "servito": None}
+
+                    if tipo == "1":  
+                        data_dict[station_id]['prezzi'][carburante]["self"] = prezzo
+                    
+                    if tipo == "0":  
+                        data_dict[station_id]['prezzi'][carburante]["servito"] = prezzo
+
     with open(JSON_DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data_dict, f, indent=2)
     print("Dati aggiornati e salvati in data.json.")
@@ -96,53 +90,73 @@ def get_cheapest_station(city, fuel_types):
         return None
 
     cheapest_station = {}
-    
-    for station in data.values():
+
+    for station_id, station in data.items():
         if city.lower() in station['indirizzo'].lower():
             for fuel_type in fuel_types:
                 for alias in (DIESEL_ALIASES if fuel_type == "diesel" else [fuel_type]):
                     if alias in station['prezzi']:
-                        prezzo = station['prezzi'][alias]['prezzo']
-                        if fuel_type not in cheapest_station or prezzo < cheapest_station[fuel_type]['prezzo']:
-                            cheapest_station[fuel_type] = {
-                                'gestore': station['gestore'],
-                                'indirizzo': station['indirizzo'],
-                                'prezzo': prezzo,
-                                'latitudine': station['latitudine'],
-                                'longitudine': station['longitudine']
-                            }
+                        prezzi = station['prezzi'][alias]
+                        if prezzi["self"] is not None:
+                            if fuel_type not in cheapest_station or prezzi["self"] < cheapest_station[fuel_type]['prezzo_self']:
+                                cheapest_station[fuel_type] = {
+                                    'gestore': station['gestore'],
+                                    'indirizzo': station['indirizzo'],
+                                    'prezzo_self': prezzi["self"],
+                                    'prezzo_servito': prezzi["servito"],
+                                    'latitudine': station['latitudine'],
+                                    'longitudine': station['longitudine']
+                                }
     return cheapest_station
 
-def send_telegram_message(city, fuel_types, chat_id):
+def send_telegram_message(city, fuel_types, chat_ids):
     cheapest_stations = get_cheapest_station(city, fuel_types)
+    if not cheapest_stations:
+        for chat_id in chat_ids:
+            try:
+                bot.send_message(chat_id, f"❌ Nessuna stazione trovata per i carburanti richiesti a {city}.")
+            except telebot.apihelper.ApiTelegramException as e:
+                print(f"Errore nell'invio del messaggio a {chat_id}: {e}")
+        return
+
     messages = []
-    
+
     for fuel_type, station in cheapest_stations.items():
         google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={station['latitudine']},{station['longitudine']}"
+        prezzo_self = f"{station['prezzo_self']}€/L" if station['prezzo_self'] is not None else "N/D"
+        prezzo_servito = f"{station['prezzo_servito']}€/L" if station['prezzo_servito'] is not None else "N/D"
+
         message = (
             f"🏆 *Miglior distributore a {city} per {fuel_type}* 🏆\n\n"
             f"🏪 *Gestore:* {station['gestore']}\n"
             f"📍 *Indirizzo:* {station['indirizzo']}\n"
-            f"⛽ *Prezzo:* {station['prezzo']}€/L\n\n"
+            f"⛽ *Prezzo Self:* {prezzo_self}\n"
+            f"🛠️ *Prezzo Servito:* {prezzo_servito}\n\n"
             f"🗺️ [Vedi su Google Maps]({google_maps_url})"
         )
         messages.append(message)
-    
-    if messages:
-        bot.send_message(chat_id, "\n\n".join(messages), parse_mode='Markdown', disable_web_page_preview=True)
-    else:
-        bot.send_message(chat_id, f"❌ Nessuna stazione trovata per i carburanti richiesti a {city}.")
 
+    for chat_id in chat_ids:
+        try:
+            bot.send_message(chat_id, "\n\n".join(messages), parse_mode='Markdown', disable_web_page_preview=True)
+        except telebot.apihelper.ApiTelegramException as e:
+            print(f"Errore nell'invio del messaggio a {chat_id}: {e}")
+
+def delete_temp_files():
+    try:
+        os.remove("anagrafica.csv")
+        os.remove("prezzi.csv")
+        os.remove(JSON_DATA_FILE)
+        #print("File temporanei eliminati con successo.")
+    except FileNotFoundError:
+        print("File già eliminati o non trovati.")
 
 def main():
     city = "<CITY>"
     fetch_and_combine_csv_data()
-    
-    # Invia il prezzo più basso per benzina e diesel a una chat
     send_telegram_message(city, ["benzina", "diesel"], CHAT_IDS["all_fuels"])
-    
-    # Invia solo il prezzo della benzina a un'altra chat
     send_telegram_message(city, ["benzina"], CHAT_IDS["only_benzina"])
+    delete_temp_files()
 
 if __name__ == "__main__":
     main()
