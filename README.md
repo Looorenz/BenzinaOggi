@@ -31,6 +31,7 @@ CHAT_IDS = {
     "all_fuels": "<CHAT-ID>",  
     "only_benzina": "<CHAT-ID>"
 }
+city = "<CITY>"
 ```
 
 3. The bot fetches station and price data from official CSV files.
